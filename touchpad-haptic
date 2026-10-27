@@ -1,0 +1,137 @@
+#!/usr/bin/python3 -I
+"""Set haptic feedback intensity of Goodix pressure touchpads on Linux.
+
+The touchpad exposes the standard HID Haptics "Intensity" usage as feature
+report 0x09. Windows sets it from Settings -> Touchpad -> Touchpad feedback.
+The firmware keeps the last value across reboots but never reports it back,
+and Windows writes its own value on every boot, so the saved value is
+re-applied on every Linux boot by touchpad-haptic.service.
+
+Usage:
+  touchpad-haptic                 show the detected touchpad and saved level
+  touchpad-haptic set N           apply level N (0 = off, 100 = strongest) and save it
+  touchpad-haptic try N           apply level N without saving
+  touchpad-haptic off             same as "set 0"
+  touchpad-haptic apply           apply the saved level (used by the systemd service)
+
+Commands that change the level re-run themselves through sudo.
+"""
+import fcntl
+import glob
+import os
+import sys
+import time
+
+CONFIG = "/etc/touchpad-haptic.conf"
+REPORT_ID = 0x09
+
+# HID_ID -> (name, firmware value is inverted). Only list devices that were
+# tested: on the GXTP5100 firmware 0 is the strongest feedback and 100 is off.
+DEVICES = {
+    "0018:000027C6:000001E9": ("Goodix GXTP5100 (27C6:01E9)", True),
+}
+
+# Haptics page / Simple Haptic Controller / Intensity in report 0x09, range 0-100.
+# Refuse to write if the device does not declare exactly this.
+HAPTIC_INTENSITY_RDESC = bytes.fromhex("05 0e 09 01 a1 02 09 23 85 09 15 00 25 64 75 08 95 01 b1 02")
+
+
+def HIDIOCSFEATURE(n):  # _IOC(_IOC_READ|_IOC_WRITE, 'H', 0x06, n)
+    return (3 << 30) | (n << 16) | (ord("H") << 8) | 0x06
+
+
+def find_device():
+    """Return (hidraw path, name, inverted) of the first supported touchpad, or None."""
+    for node in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
+        try:
+            with open(f"{node}/device/uevent") as f:
+                hid_id = next((line.split("=", 1)[1].strip() for line in f if line.startswith("HID_ID=")), None)
+            if hid_id not in DEVICES:
+                continue
+            with open(f"{node}/device/report_descriptor", "rb") as f:
+                if HAPTIC_INTENSITY_RDESC not in f.read():
+                    sys.exit(f"{node}: touchpad found, but it does not declare haptic intensity in report 0x09; not touching it")
+        except OSError:
+            continue
+        name, inverted = DEVICES[hid_id]
+        return "/dev/" + os.path.basename(node), name, inverted
+    return None
+
+
+def send(level, retries=10):
+    # Retries cover early boot, when the touchpad may not be bound yet.
+    for attempt in range(retries):
+        found = find_device()
+        if found:
+            dev, name, inverted = found
+            raw = 100 - level if inverted else level
+            try:
+                fd = os.open(dev, os.O_RDWR)
+                try:
+                    fcntl.ioctl(fd, HIDIOCSFEATURE(2), bytearray([REPORT_ID, raw]))
+                finally:
+                    os.close(fd)
+                print(f"{name} at {dev}: haptic level set to {level} (raw {raw})")
+                return
+            except OSError as e:
+                err = f"{dev}: {e}"
+        else:
+            err = "no supported touchpad found"
+        if attempt < retries - 1:
+            time.sleep(0.5)
+    sys.exit(err)
+
+
+def read_config():
+    try:
+        with open(CONFIG) as f:
+            return parse_level(f.read().strip())
+    except FileNotFoundError:
+        return None
+
+
+def parse_level(s):
+    try:
+        v = int(s)
+    except ValueError:
+        sys.exit(f"invalid level {s!r}, expected an integer 0-100")
+    if not 0 <= v <= 100:
+        sys.exit(f"level {v} out of range 0-100")
+    return v
+
+
+def ensure_root():
+    if os.geteuid() != 0:
+        os.execvp("sudo", ["sudo", os.path.abspath(sys.argv[0]), *sys.argv[1:]])
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "status"
+    if cmd == "status" and len(argv) <= 2:
+        found = find_device()
+        saved = read_config()
+        print(f"touchpad: {f'{found[1]} at {found[0]}' if found else 'no supported touchpad found'}")
+        print(f"saved level: {saved if saved is not None else 'none (left as set by firmware / last OS)'}")
+    elif cmd in ("set", "try") and len(argv) == 3:
+        level = parse_level(argv[2])
+        ensure_root()
+        send(level)
+        if cmd == "set":
+            with open(CONFIG, "w") as f:
+                f.write(f"{level}\n")
+            print(f"saved to {CONFIG}")
+    elif cmd == "off" and len(argv) == 2:
+        main([argv[0], "set", "0"])
+    elif cmd == "apply" and len(argv) == 2:
+        level = read_config()
+        if level is None:
+            print(f"{CONFIG} not found, nothing to apply")
+            return
+        ensure_root()
+        send(level)
+    else:
+        sys.exit(__doc__.split("Usage:", 1)[1].rstrip())
+
+
+if __name__ == "__main__":
+    main(sys.argv)

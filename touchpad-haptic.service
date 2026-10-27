@@ -1,0 +1,12 @@
+[Unit]
+Description=Apply saved touchpad haptic feedback level
+Documentation=https://github.com/hotsezus/goodix-touchpad-haptic
+Before=display-manager.service
+ConditionPathExists=/etc/touchpad-haptic.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/touchpad-haptic apply
+
+[Install]
+WantedBy=multi-user.target
