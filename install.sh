@@ -37,8 +37,12 @@ case "${1:-}" in
         echo "Removed $CONFIG"
         ;;
     "")
-        command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
-        install -m 755 "$SRC/touchpad-haptic" "$BIN"
+        # .run payload ships the binary next to this script; a clone has it under target/.
+        for f in "$SRC/touchpad-haptic" "$SRC/target/x86_64-unknown-linux-musl/release/touchpad-haptic" "$SRC/target/release/touchpad-haptic"; do
+            [ -x "$f" ] && { BIN_SRC=$f; break; }
+        done
+        [ -n "${BIN_SRC:-}" ] || { echo "touchpad-haptic binary not found, run: cargo build --release" >&2; exit 1; }
+        install -m 755 "$BIN_SRC" "$BIN"
         install -m 644 "$SRC/touchpad-haptic.service" "$UNIT"
         systemctl daemon-reload
         systemctl enable touchpad-haptic.service

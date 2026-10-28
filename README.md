@@ -16,7 +16,7 @@ This project adds:
 |---|---|---|
 | Goodix GXTP5100 (GT7868Q) | `27C6:01E9` | Lenovo ThinkBook 14 G7+ IAH (21TK) |
 
-Check yours with `grep -H . /sys/bus/hid/devices/*/uevent | grep HID_NAME`.
+Check yours with `grep -h HID_ID /sys/class/hidraw/*/device/uevent`.
 Other Goodix pressure pads (`27C6:01E7`, `01E8`, `01EA`, `01EB`, `0F9x`, …) probably work the same way, but are not enabled until someone tests them — see [Adding a device](#adding-a-device).
 
 ## Install
@@ -28,9 +28,15 @@ sh touchpad-haptic-*.run
 touchpad-haptic set 50
 ```
 
-Or from a clone: `./install.sh`.
+This installs `/usr/local/bin/touchpad-haptic` and enables `touchpad-haptic.service`.
+The CLI is a single static binary (x86_64, no runtime dependencies); only systemd and `sudo` are expected on the system.
 
-This installs `/usr/local/bin/touchpad-haptic` and enables `touchpad-haptic.service`. Requires `python3` and systemd.
+### From source
+
+```sh
+cargo build --release
+./install.sh
+```
 
 ## Usage
 
@@ -69,7 +75,7 @@ There is no click-force (press threshold) setting: the firmware decides when a p
 ## Adding a device
 
 1. Find your touchpad's `HID_ID` in `/sys/class/hidraw/hidraw*/device/uevent`.
-2. Add it to `DEVICES` in `touchpad-haptic` with `inverted=False`, run `touchpad-haptic try 0` and `try 100`, and see which one disables feedback.
+2. Add it to `MODELS` in `src/main.rs` with `inverted: false`, build, run `touchpad-haptic try 0` and `try 100`, and see which one disables feedback.
 3. Open a pull request with the ID, laptop model and the `inverted` value that works.
 
 The CLI refuses to write to a device whose descriptor does not declare haptic intensity in report `0x09`.
@@ -77,8 +83,11 @@ The CLI refuses to write to a device whose descriptor does not declare haptic in
 ## Building the installer
 
 ```sh
+rustup target add x86_64-unknown-linux-musl
 ./build-run.sh   # writes dist/touchpad-haptic-<version>.run
 ```
+
+Pushing a `v*` tag that matches the version in `Cargo.toml` builds the `.run` in GitHub Actions and publishes it as a release.
 
 ## License
 

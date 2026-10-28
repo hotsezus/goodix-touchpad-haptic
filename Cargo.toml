@@ -1,0 +1,16 @@
+[package]
+name = "touchpad-haptic"
+version = "0.2.0"
+edition = "2024"
+description = "Haptic feedback level control for Goodix pressure touchpads on Linux"
+license = "MIT"
+repository = "https://github.com/hotsezus/goodix-touchpad-haptic"
+
+[dependencies]
+libc = "0.2.191"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"
