@@ -7,7 +7,7 @@ Linux has no setting for it, so the touchpad stays at whatever level was last wr
 This project adds:
 
 - `touchpad-haptic` — a CLI to change the level (0 = off, 100 = strongest)
-- `touchpad-haptic.service` — a systemd unit that re-applies the saved level on every boot, before the login screen
+- a udev rule that re-applies the saved level whenever the touchpad appears — at boot, before the login screen
 - a `.run` installer
 
 ## Supported hardware
@@ -28,8 +28,15 @@ sh touchpad-haptic-*.run
 touchpad-haptic set 50
 ```
 
-This installs `/usr/local/bin/touchpad-haptic` and enables `touchpad-haptic.service`.
-The CLI is a single static binary (x86_64, no runtime dependencies); only systemd and `sudo` are expected on the system.
+This installs `/usr/local/bin/touchpad-haptic` and `/etc/udev/rules.d/90-touchpad-haptic.rules`.
+Upgrading from v0.1.0 removes its `touchpad-haptic.service`.
+
+Requirements:
+
+- x86_64 Linux. The CLI is a single static binary with no runtime dependencies, so the distribution does not matter.
+- udev or eudev, for applying the level at boot. This works with any init system (systemd, OpenRC, runit, s6, dinit).
+- `sudo`, `doas` or `run0` to change the level as a normal user, or run the commands as root.
+- Not supported: NixOS, where `/etc` is generated declaratively.
 
 ### From source
 
@@ -45,10 +52,11 @@ touchpad-haptic                 show the detected touchpad and saved level
 touchpad-haptic set N           apply level N (0 = off, 100 = strongest) and save it
 touchpad-haptic try N           apply level N without saving
 touchpad-haptic off             same as "set 0"
-touchpad-haptic apply           apply the saved level (used by the systemd service)
+touchpad-haptic apply           apply the saved level (run by the udev rule at boot)
+touchpad-haptic udev-rule       print the udev rule for supported touchpads (used by install.sh)
 ```
 
-Changing the level needs root; the CLI re-runs itself through `sudo`. The saved level lives in `/etc/touchpad-haptic.conf`.
+Changing the level needs root; the CLI re-runs itself through `sudo`, `doas` or `run0`, whichever is found first. The saved level lives in `/etc/touchpad-haptic.conf`.
 
 ## Uninstall
 
@@ -68,7 +76,7 @@ Firmware behaviour observed on the GXTP5100:
 - **The value is inverted**: raw 0 is the strongest feedback, raw 100 is off. The CLI hides this.
 - **The value persists** across suspend, reboot and power-off.
 - **It cannot be read back**: the firmware answers GET_REPORT only for reports `0x02` and `0x06`.
-- **Windows overwrites it on every boot** with its own slider value — hence the boot-time service for dual-boot systems.
+- **Windows overwrites it on every boot** with its own slider value — hence re-applying it at every boot on dual-boot systems.
 
 There is no click-force (press threshold) setting: the firmware decides when a press is a click, and neither the HID descriptor nor Windows exposes it. Windows' *Touchpad sensitivity* option is host-side tap/palm rejection, comparable to libinput's disable-while-typing and palm detection.
 
@@ -76,7 +84,8 @@ There is no click-force (press threshold) setting: the firmware decides when a p
 
 1. Find your touchpad's `HID_ID` in `/sys/class/hidraw/hidraw*/device/uevent`.
 2. Add it to `MODELS` in `src/main.rs` with `inverted: false`, build, run `touchpad-haptic try 0` and `try 100`, and see which one disables feedback.
-3. Open a pull request with the ID, laptop model and the `inverted` value that works.
+3. Reinstall so the udev rule (generated from `MODELS`) includes it.
+4. Open a pull request with the ID, laptop model and the `inverted` value that works.
 
 The CLI refuses to write to a device whose descriptor does not declare haptic intensity in report `0x09`.
 

@@ -12,7 +12,7 @@ mkdir -p dist
 cargo build --release --locked --target "$TARGET"
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
-cp "target/$TARGET/release/touchpad-haptic" touchpad-haptic.service install.sh "$stage/"
+cp "target/$TARGET/release/touchpad-haptic" install.sh "$stage/"
 
 {
     cat <<'EOF'
@@ -27,7 +27,7 @@ sh "$tmp/install.sh" "$@"
 exit
 __PAYLOAD_BELOW__
 EOF
-    tar -cz --owner=0 --group=0 --numeric-owner -C "$stage" touchpad-haptic touchpad-haptic.service install.sh
+    tar -cz --owner=0 --group=0 --numeric-owner -C "$stage" touchpad-haptic install.sh
 } > "$OUT"
 chmod +x "$OUT"
 echo "$OUT"

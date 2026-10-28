@@ -1,13 +1,15 @@
 #!/bin/sh
 # Install or remove touchpad-haptic.
-#   ./install.sh               install CLI and systemd service
+#   ./install.sh               install the CLI and the udev rule that applies the saved level at boot
 #   ./install.sh --uninstall   remove them, keep the saved level
 #   ./install.sh --purge       remove them and the saved level
 set -eu
 
 BIN=/usr/local/bin/touchpad-haptic
-UNIT=/etc/systemd/system/touchpad-haptic.service
+RULE=/etc/udev/rules.d/90-touchpad-haptic.rules
 CONFIG=/etc/touchpad-haptic.conf
+# Installed by v0.1.0; removed on upgrade and uninstall.
+LEGACY_UNIT=/etc/systemd/system/touchpad-haptic.service
 SRC=$(cd "$(dirname "$0")" && pwd)
 
 case "${1:-}" in
@@ -16,14 +18,34 @@ case "${1:-}" in
 esac
 
 if [ "$(id -u)" -ne 0 ]; then
-    exec sudo sh "$SRC/install.sh" "$@"
+    for elevator in sudo doas run0; do
+        command -v "$elevator" >/dev/null && exec "$elevator" sh "$SRC/install.sh" "$@"
+    done
+    echo "root is required, and none of sudo, doas, run0 was found; run this as root" >&2
+    exit 1
 fi
 
-uninstall() {
+reload_udev() {
+    if command -v udevadm >/dev/null; then
+        udevadm control --reload
+    else
+        echo "warning: udevadm not found; the saved level will not be applied at boot" >&2
+    fi
+}
+
+remove_legacy_unit() {
+    [ -f "$LEGACY_UNIT" ] || return 0
     systemctl disable touchpad-haptic.service 2>/dev/null || true
-    rm -f "$BIN" "$UNIT"
-    systemctl daemon-reload
-    echo "Removed $BIN and $UNIT"
+    rm -f "$LEGACY_UNIT"
+    systemctl daemon-reload 2>/dev/null || true
+    echo "Removed $LEGACY_UNIT (replaced by the udev rule)"
+}
+
+uninstall() {
+    remove_legacy_unit
+    rm -f "$BIN" "$RULE"
+    reload_udev
+    echo "Removed $BIN and $RULE"
 }
 
 case "${1:-}" in
@@ -43,10 +65,12 @@ case "${1:-}" in
         done
         [ -n "${BIN_SRC:-}" ] || { echo "touchpad-haptic binary not found, run: cargo build --release" >&2; exit 1; }
         install -m 755 "$BIN_SRC" "$BIN"
-        install -m 644 "$SRC/touchpad-haptic.service" "$UNIT"
-        systemctl daemon-reload
-        systemctl enable touchpad-haptic.service
-        echo "Installed $BIN and $UNIT"
+        mkdir -p "$(dirname "$RULE")"
+        "$BIN" udev-rule > "$RULE"
+        chmod 644 "$RULE"
+        remove_legacy_unit
+        reload_udev
+        echo "Installed $BIN and $RULE"
         "$BIN" status
         if [ ! -f "$CONFIG" ]; then
             echo
